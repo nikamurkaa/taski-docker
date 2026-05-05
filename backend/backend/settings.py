@@ -12,6 +12,7 @@ ALLOWED_HOSTS = [
     'localhost',
     '127.0.0.1',
     'backend',
+    'testserver',
     '158.160.200.106',
     'taski-nikol.duckdns.org',
 ]
