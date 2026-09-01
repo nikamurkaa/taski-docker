@@ -14,11 +14,10 @@
 - Docker volumes для database и static;
 - `docker-compose.yml` для локального запуска;
 - `docker-compose.production.yml` для server deployment;
-- публикация Docker images;
-- GitHub Actions CI/CD;
-- SSH deployment;
+- GitHub Actions CI для backend/frontend и Docker build;
+- отдельный ручной workflow для публикации Docker images и SSH deployment;
 - migrations/static steps после deploy;
-- Telegram notification после успешного workflow.
+- Telegram notification после успешного production workflow.
 
 ## Стек
 
@@ -54,7 +53,9 @@ Nginx gateway
 ├── backend/
 ├── frontend/
 ├── gateway/
-├── .github/workflows/main.yml
+├── .github/workflows/
+│   ├── main.yml              # CI: tests + Docker build
+│   └── deploy.yml            # manual production deployment
 ├── docker-compose.yml
 ├── docker-compose.production.yml
 ├── setup.cfg
@@ -100,11 +101,15 @@ docker compose exec backend python manage.py collectstatic --noinput
 
 ## CI/CD
 
-Workflow GitHub Actions автоматизирует проверки, сборку Docker images и server deployment. Секреты Docker Hub, SSH и Telegram должны храниться в GitHub Actions Secrets, а не в repository files.
+`.github/workflows/main.yml` запускается на push и pull request в `main`. Он проверяет backend, frontend и локальную сборку Docker images без production-секретов.
 
-## Что показывает проект
+`.github/workflows/deploy.yml` запускается вручную через `workflow_dispatch`. Он публикует images в Docker Hub и выполняет SSH deployment только для настроенного production environment.
 
-Этот репозиторий полезен как доказательство навыков:
+Docker Hub namespace не зашит в repository files: `docker-compose.production.yml` использует переменную `DOCKER_USERNAME`, а GitHub Actions — secret с тем же именем.
+
+Секреты Docker Hub, SSH и Telegram хранятся в GitHub Actions Secrets и не должны попадать в repository files.
+
+## Что демонстрирует проект
 
 - Docker и Compose;
 - multi-container application setup;
@@ -115,7 +120,7 @@ Workflow GitHub Actions автоматизирует проверки, сбор�
 
 ## Статус
 
-Проект выполнен в рамках курса **«Python-разработчик» Яндекс Практикума** и используется как portfolio case по инфраструктуре backend-приложений.
+Проект выполнен в рамках курса **«Python-разработчик» Яндекс Практикума** и демонстрирует инфраструктуру backend-приложения: контейнеризацию, CI и контролируемый production deployment.
 
 ## Автор инфраструктурной реализации
 
