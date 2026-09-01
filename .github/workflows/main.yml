@@ -1,12 +1,17 @@
-name: Main Taski workflow
+name: CI
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
 
 jobs:
-  tests:
+  backend:
+    name: Backend tests
     runs-on: ubuntu-latest
 
     services:
@@ -25,7 +30,7 @@ jobs:
           --health-retries 5
 
     steps:
-      - name: Check out code
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Set up Python
@@ -37,9 +42,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip setuptools
           pip install flake8==7.3.0 flake8-isort==7.0.0
-          pip install -r ./backend/requirements.txt
+          pip install -r backend/requirements.txt
 
-      - name: Test with flake8 and django tests
+      - name: Lint and test backend
         env:
           POSTGRES_USER: django_user
           POSTGRES_PASSWORD: django_password
@@ -48,149 +53,46 @@ jobs:
           DB_PORT: 5432
         run: |
           python -m flake8 backend/
-          cd backend/
+          cd backend
           python manage.py test
 
-  frontend_tests:
+  frontend:
+    name: Frontend tests
     runs-on: ubuntu-latest
 
     steps:
-      - name: Check out code
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Install frontend dependencies
-        run: |
-          cd frontend/
-          npm ci
+        working-directory: frontend
+        run: npm ci
 
       - name: Test frontend
-        run: |
-          cd frontend/
-          CI=true npm run test
+        working-directory: frontend
+        run: CI=true npm run test
 
-  build_backend_and_push_to_docker_hub:
-    name: Push backend Docker image to Docker Hub
+  docker-build:
+    name: Docker build
     runs-on: ubuntu-latest
-    needs: tests
+    needs: [backend, frontend]
 
     steps:
-      - name: Check out code
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Build backend image
+        run: docker build -t taski-backend:ci backend
 
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
+      - name: Build frontend image
+        run: docker build -t taski-frontend:ci frontend
 
-      - name: Build and push backend image
-        uses: docker/build-push-action@v6
-        with:
-          context: ./backend/
-          push: true
-          tags: kindarufy/taski_backend:latest
-
-  build_frontend_and_push_to_docker_hub:
-    name: Push frontend Docker image to Docker Hub
-    runs-on: ubuntu-latest
-    needs: frontend_tests
-
-    steps:
-      - name: Check out code
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
-
-      - name: Build and push frontend image
-        uses: docker/build-push-action@v6
-        with:
-          context: ./frontend/
-          push: true
-          tags: kindarufy/taski_frontend:latest
-
-  build_gateway_and_push_to_docker_hub:
-    name: Push gateway Docker image to Docker Hub
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Check out code
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
-
-      - name: Build and push gateway image
-        uses: docker/build-push-action@v6
-        with:
-          context: ./gateway/
-          push: true
-          tags: kindarufy/taski_gateway:latest
-
-  deploy:
-    name: Deploy to production server
-    runs-on: ubuntu-latest
-    needs:
-      - build_backend_and_push_to_docker_hub
-      - build_frontend_and_push_to_docker_hub
-      - build_gateway_and_push_to_docker_hub
-
-    steps:
-      - name: Check out code
-        uses: actions/checkout@v4
-
-      - name: Copy docker-compose.production.yml via SSH
-        uses: appleboy/scp-action@master
-        with:
-          host: ${{ secrets.HOST }}
-          username: ${{ secrets.USER }}
-          key: ${{ secrets.SSH_KEY }}
-          source: docker-compose.production.yml
-          target: taski
-
-      - name: Deploy with Docker Compose
-        uses: appleboy/ssh-action@master
-        with:
-          host: ${{ secrets.HOST }}
-          username: ${{ secrets.USER }}
-          key: ${{ secrets.SSH_KEY }}
-          script: |
-            cd taski
-            sudo docker compose -f docker-compose.production.yml pull
-            sudo docker compose -f docker-compose.production.yml down
-            sudo docker compose -f docker-compose.production.yml up -d
-            sudo docker compose -f docker-compose.production.yml exec -T backend python manage.py migrate
-            sudo docker compose -f docker-compose.production.yml exec -T backend python manage.py collectstatic --noinput
-            sudo docker compose -f docker-compose.production.yml exec -T backend cp -r /app/collected_static/. /backend_static/static/
-
-  send_message:
-    name: Send Telegram notification
-    runs-on: ubuntu-latest
-    needs: deploy
-    steps:
-      - name: Send message
-        uses: appleboy/telegram-action@master
-        with:
-          to: ${{ secrets.TELEGRAM_TO }}
-          token: ${{ secrets.TELEGRAM_TOKEN }}
-          message: Деплой успешно выполнен!
+      - name: Build gateway image
+        run: docker build -t taski-gateway:ci gateway
